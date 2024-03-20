@@ -1,0 +1,1568 @@
+---
+title: "Network Intrusion Detection Using Logistic Regression and K-Nearest Neighbour Using UNSW_NB15 dataset"
+author: "Kenneth Nnadi"
+date: "20 march, 2023"
+output:
+  html_document:
+    df_print: paged
+  pdf_document: default
+  word_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+```
+
+
+
+# R Markdown
+*Introduction of Dataset*
+The UNSW-NB15 dataset is a network intrusion detection dataset created by the University of New South Wales (UNSW) in Australia. It contains network traffic data that simulates a real-world environment and includes various types of attacks, such as DoS (Denial of Service), reconnaissance, backdoors, and others. The dataset consists of both normal traffic and attack traffic, and it is divided into training and testing sets. It has been widely used as a benchmark dataset for evaluating the performance of intrusion detection systems and for developing new machine learning algorithms to detect network attacks.
+
+*Objective of Project*
+The main objective of this project is to develop a machine learning-based intrusion detection system that can predict network intrusion detection (ID) using the publicly available UNSW-NB15 dataset. The dataset contains normal and attack records, including nine attack categories and malware such as analysis, backdoors, DoS, exploits, generic, reconnaissance, fuzzers for anomalous activity, shellcode, and worms. The dataset also has a binary classification of attack category (1/0), with a "label" of 0 representing normal or non-attack and 1 representing any type of attack.Secondly, differents models was compared to find the best model for predicting an intrusion using this dataset.
+
+To achieve this objective, i used generalized linear models (GLMs) with binomial families(Logistic Regression) to predict IDs. The experiments conducted in this work were as follows:
+
+(a) I conducted an exploratory analysis of the independent variables to gain insight into the dataset's structure and identify any outliers or anomalies.
+
+(b) I determined if there was a significant association between the input features and the response variable. This involved running statistical tests to identify the most significant features that contribute to the model's prediction accuracy.
+(c) I performed data pre-processing to clean and scale the data for accurate prediction
+(d) I evaluated the accuracy of all input features in predicting Label. I trained the models on the training dataset and used the test set to evaluate its performance.
+
+(e) I determined how accurately the most significant features, obtained from step (b), predict intrusion. We used these features to train the model and evaluated its performance on the test set.
+
+(f) I compared the performance of the model using the most significant features and using all features in the dataset to determine which model performs better.
+
+(g) I also compared the Logistic regression model to the K-nearest neighbor model to determine which model performs better in classification of attack and or intrusion.
+
+
+```{r}
+#setwd (Please set the working directory to the downloaded dataset or the location of the dataset)
+```
+
+The first thin we carried out is Loading the required Library needed for this project.
+
+ Load some necessary libraries needed
+```{r}
+library(tidyverse)
+library(here)
+library(broom)
+library(ggplot2)
+library(psych)
+library(caret)
+library(pROC)
+library(ROCR)
+library(ROSE)
+library(AUC)
+```
+
+*(a) I conducted an exploratory analysis of the independent variables to gain insight into the dataset's structure and identify any outliers or anomalies.*
+
+Read training dataset from csv file from current directory
+Read testing dataset from csv file from current directory
+
+```{r}
+train_data<-read.csv("UNSW_NB15_training-set.csv") 
+dim(train_data)
+test_data <- read.csv("UNSW_NB15_testing-set.csv")
+dim(test_data)
+```
+The dimension of both the training and test datset is 175341 rows and 45 coloumn (predictors)
+Check the class distribution of training set and also the distribution of Attack categories
+
+```{r}
+tab_train<-table(train_data$attack_cat)
+tab_train
+```
+
+
+Check the class distribution of testing set and also the distribution of Attack categories
+
+```{r}
+tab_test<-table(test_data$attack_cat)
+tab_test
+```
+
+#Check the class distribution of attack category for both training and test set
+Using barchart, I illustrate the Distribution of data in each of the Attack categories
+```{r}
+
+Class_Distribution <- data.frame(Class_Name = names(tab_train),
+                                 Training = as.numeric(tab_train),
+                                 Testing = as.numeric(tab_test))
+
+ggplot(Class_Distribution, aes(x = Class_Name, y = Training, fill = "Training")) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c("#d95f02"), name = "Dataset") +
+  labs(x = "Attack Category", y = "Count", 
+       title = "Distribution of Attack Categories in Training Dataset") +
+  geom_text(aes(label = Training), vjust = -0.3, size = 3)
+
+ggplot(Class_Distribution, aes(x = Class_Name, y = Training, fill = "Testing")) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = c("#1b9e77"), name = "Dataset") +
+  labs(x = "Attack Category", y = "Count", 
+       title = "Distribution of Attack Categories in Testing Dataset") +
+  geom_text(aes(label = Testing), vjust = -0.3, size = 3)
+
+```
+The Barchart for both the training and testing datasets reveals that there are nine categories of attacks, with "Normal" representing non-attacks. However, the data is highly imbalanced, with a majority of non-attacks compared to attacks. Among the training data, the most frequently occurring attack categories are "Generic," "Exploits," "Fuzzers," "DoS," and "Reconnaissance."
+
+
+
+#Exclude ID and attack category from training set  
+Below, i excluded the ID column and the class label that will be used to classify the attck categories. This is done twice because the dataset is divided into two which are training dataset and test dataset. This is also part of the data pre-processing in the dataset
+
+*test<-test[which(test$is_ftp_login!=2),] : The "test" data frame is subsetted by excluding rows where the value of the "is_ftp_login" column is equal to 2 using the "which()" function.*
+
+
+```{r}
+train<-data.frame(train_data[,-c(1, 27, 45)], label=as.factor(train_data$label))
+train<-train[which(train$is_ftp_login!=2),]
+dim(train)
+```
+
+
+#Exclude ID and attack category from test set 
+
+
+```{r}
+#Exclude ID and attack category from test set 
+test<-data.frame(test_data[,-c(1, 44,45, 27)], label=as.factor(test_data$label))
+test<-test[which(test$is_ftp_login!=2),]
+dim(test)  
+```
+
+##Compare the class label distribution of train and test dataset
+Here, using barplot i compared the class label of (1/0) of the train and test dataset with 1 representing attack and 0 representing non-attack. The class label is going to be used for the classification. 
+```{r}
+Class_Label <-data.frame(Training=as.numeric(table(train$label)), 
+                    Testing=as.numeric(table(test$label)))
+
+Class_Label_Ver1<-t(as.matrix(Class_Label))
+colnames(Class_Label_Ver1)<-c("0", "1")
+
+
+barplot(Class_Label_Ver1,
+         main = "Class Label distribution of train and test dataset",
+         xlab = "Class label",ylab="Frequency", col = c("red","green"), 
+         cex.lab=1.3, cex.axis=1.3, cex.main=1.3, 
+          cex.sub=1.3, cex.names=1.3)
+
+legend("topleft",
+       c("Train","Test"),
+        fill = c("red","green"), cex=1.5)
+
+
+```
+
+Here, we explored the distribution of binary class label which is represented in 1/0 in the dataset.
+
+**In Train: there are 44.94% of class "normal" and 55.06% of class "attack"**
+**In Test: there are 31.91% of class "normal" and 68.06% of class "attack"**
+
+
+
+*CATEGORICAL VARIABLES IN THE DATASET*
+
+ 
+We will now investigate the distribution of Attack categories across the Predictor variables. 
+This analysis will demonstrate how each predictor is distributed among the attack categories.
+
+
+```{r}
+library(ggplot2)
+
+service <- train %>% 
+  count(attack_cat, service) %>% 
+  ggplot(aes(factor(service), n, fill = attack_cat)) +
+  geom_col(position = 'dodge') +
+  labs(title = "Histogram of Service", x = "Service", y = "Frequency") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 10), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20))
+service
+```
+
+The service field in the dataset provides information about the network protocol or service associated with the recorded network traffic. This field identifies the type of service or protocol used for communication. Examples of services in the dataset include HTTP, FTP, SMTP, DNS, SSH, among others.
+
+In the case of "normal," there are many instances of "dns" and a few rare values, indicating a prevalence of "-" in the dataset. In contrast, in the attack data, "dns" occurs more frequently than any other value, with only a few instances of other protocols such as HTTP, resulting in low distribution. The distribution of "normal" attacks is low, while a high distribution of attacks is prevalent.
+
+
+##For State Variable  
+ 
+
+```{r}
+state <- train %>% 
+  count(attack_cat, state) %>% 
+  ggplot(aes(factor(state), n, fill = attack_cat)) +
+  geom_col(position = 'dodge') +
+  labs(title = "Histogram of State", x = "State", y = "Frequency") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 10), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 10))
+state
+```
+
+
+The "state" field represents the state and activity of the protocol, such as TCP, UDP, or ICMP, and it indicates the state of the connection, such as establishing, closing, or maintaining a connection. The values of the "state" field vary depending on the protocol and its activity. For TCP connections, the "state" field may contain values such as "FIN", "SYN", "ACK", "RST", "URG", and "PSH."
+In the case of "normal" data, "fin" is the most frequently occurring value, followed by "cons," which is about half as frequent as "fin." Additionally, a few instances of "int" are present. On the other hand, in the attack data, "int" occurs more frequently than any normal category value, indicating a potentially important feature for detection. There are very few instances of "fin" and low frequency of other TCP fields in the attack category, indicating a low distribution of the field. Based on my understanding of the data, there seem to be more TCP connections that have not been closed after packets are sent, as evidenced by the prevalence of "FIN." This feature can be used to monitor network activity and detect any potential issues.
+
+
+
+
+##For is_ftp_login Variable  
+ 
+```{r}
+library(ggplot2)
+
+is_ftp_login <- train %>% 
+  count(attack_cat, is_ftp_login) %>% 
+  ggplot(aes(factor(is_ftp_login), n, fill = attack_cat)) +
+  geom_col(position = 'dodge') +
+  labs(title = " Histogram of is_ftp_login", x = "is_ftp_login", y = "Frequency") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 10), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20))
+is_ftp_login
+```
+
+
+The "is_ftp_login" field in the dataset indicates whether a transaction is an FTP login or not. It has a binary value, with 1 indicating that the transaction is an FTP login and 0 indicating that it is not. FTP (File Transfer Protocol) is a standard network protocol used for transferring files from one host to another over a TCP-based network, such as the Internet.
+The distribution of "is_ftp_login" is comparatively higher in the normal category than in the attack category. We observe a significant difference in the representation of "is_ftp_login" between the two categories.
+
+
+ 
+```{r}
+library(ggplot2)
+
+is_sm_ips_ports <- train %>% 
+  count(attack_cat, is_sm_ips_ports) %>% 
+  ggplot(aes(factor(is_sm_ips_ports), n, fill = attack_cat)) +
+  geom_col(position = 'dodge') +
+  labs(title = "Bar Diagram of is_sm_ips_ports", x = "is_sm_ips_ports", y = "Frequency") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 10), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 12),
+        axis.title = element_text(size = 20))
+is_sm_ips_ports
+```
+
+
+The feature "is_sm_ips_ports" in the dataset is binary and indicates if the source or destination port of a network connection is a well-known port assigned by the Internet Assigned Numbers Authority (IANA) for specific services. A value of 1 indicates that at least one end of the network connection involves a well-known port, while a value of 0 indicates that there is no involvement of any well-known port. Our observation reveals that there are a significant number of non-well-known ports in the attack category.
+
+
+#Separate categorical from training data 
+In this chunk, we saperated the categorical variables from the Traning dataset
+```{r}
+cat_varibales<-c("proto", "service", "state", "is_ftp_login", "is_sm_ips_ports" )
+
+training_cate<-data.frame(train[cat_varibales], label=train$label)
+head(training_cate)
+dim(training_cate)
+
+cate_index=which(colnames(train)%in%cat_varibales) 
+```
+
+#Separate continuous from training data 
+
+After the separation of the CATEGORICAL variable, we are saperating the CONTINOUS variable in the dataset for exploration.
+
+
+```{r}
+training_conti<-train[,-cate_index] 
+head(training_conti)
+dim(training_conti)
+summary(training_conti)
+names<-colnames(training_conti)[-37]
+```
+
+
+*In the following plots, I will be using boxplots to visualize the distribution of the continuous variables in the dataset. For some of the plots, I will be using the "Geo_point" feature in ggplot to show the distribution of the data and to identify any possible outliers in the attack categories. For other plots, I will be applying a logarithmic transformation to the variables to better capture both the small and large values and Distribution of each variable when compared to the attack categories.*
+
+
+```{r}
+dur <- train %>% 
+  ggplot(aes(attack_cat, y = log1p(dur),  fill = attack_cat)) +
+  geom_boxplot()+
+  labs(title = "Boxplot of Duration", x = "Attack Category", y = "Durtaion") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 5), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 8),
+        axis.title = element_text(size = 14))
+dur
+```
+
+
+The Duration column represents the time duration of the connection in seconds, indicating how long the connection between the source and destination lasted. For example, for a network connection, the duration would be the length of time that the connection was open. We applied natural logarithm to the Duration variable to capture the small values, and observed a low distribution of both attack and normal traffic with relatively high outliers.
+
+
+
+```{r}
+spkts <- train %>% 
+  ggplot(aes(attack_cat, y = log2(spkts),  fill = attack_cat)) +
+  geom_boxplot()+
+  labs(title = "Boxplot of Source to destination packet count ", x = "Attack Category", y = "Spkts") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 5), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 8),
+        axis.title = element_text(size = 14))
+spkts
+```
+
+
+Similarly, when we applied Log2 to reduce the variance of the data and capture the underlying distribution of the "Source to Destination Packet Count" variable, we observed a relatively higher number of attacks with high outliers.
+
+
+```{r}
+dpkts <- train %>% 
+  ggplot(aes(attack_cat, y =log1p(dpkts),  fill = attack_cat)) +
+  geom_boxplot()+
+  labs(title = "Boxplot of Destination to source packet count", x = "Attack Category", y = "dpkts") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 5), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 8),
+        axis.title = element_text(size = 14))
+dpkts
+```
+
+Similarly, by applying logarithm to the "dpkts" variable, we observed the distribution of the attack and non-attack traffic in the dataset. We found that there are outliers in the destination-to-source packet data, relative to the attack categories. there is also moderate distribution of both the attck and normal traffic. 
+
+
+```{r}
+sbytes <- train %>% 
+  ggplot(aes(attack_cat, y =log1p(sbytes),  fill = attack_cat)) +
+  geom_boxplot()+
+  labs(title = "Boxplot of Source to destination transaction bytes ", x = "Attack Category", y = "Sbytes") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 5), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 8),
+        axis.title = element_text(size = 14))
+sbytes
+```
+
+
+The natural logarithm was also applied to the Source to Destination transaction bytes, and the resulting distribution in the attack categories was observed. It was found that the size of the attacks was relatively similar to that of normal traffic. However, there were also a significant number of outliers in the Sbytes variable.
+
+
+```{r}
+dbytes <- train %>% 
+  ggplot(aes(attack_cat, y =log1p(dbytes),  fill = attack_cat)) +
+  geom_boxplot()+
+  labs(title = "Boxplot of Destination to source transaction bytes", x = "Attack Category", y = "Dbytes") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 5), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 8),
+        axis.title = element_text(size = 14))
+dbytes
+```
+
+
+The observation is that the distribution of attacks is higher than that of normal packets. 
+Additionally, there are significant outliers for DNS and Generic protocols in the boxplot
+
+
+```{r}
+rate <- train %>% 
+  ggplot(aes(attack_cat, y = rate,  fill = attack_cat)) +
+  geom_boxplot()+
+  labs(title = "Boxplot of Rate", x = "Attack Category", y = "Rate") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 5), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 8),
+        axis.title = element_text(size = 14))
+rate
+```
+
+The Rate feature in the dataset indicates the rate of the connection, measured as the number of packets per second (pps) during the last two seconds of the connection. This feature provides important information on the rate of traffic for a particular connection and can be used to detect abnormal behavior or attacks with high traffic rates. In our analysis, we observed a significant outlier in the normal traffic category, while there is a relatively higher number of attacks with high traffic rates in the attack categories.
+
+
+```{r}
+sinpkt <- train %>% 
+  ggplot(aes(attack_cat, y = log1p(sinpkt),  fill = attack_cat)) +
+  geom_boxplot()+
+  labs(title = "Boxplot of Source to destination packet count ", x = "Attack Category", y = "Sinpkt") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 5), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 8),
+        axis.title = element_text(size = 14))
+sinpkt
+```
+
+The Source to Destination packet count shows an equal distribution between attacks and normal traffic. The natural logarithm was applied to capture the relatively smaller values in the Sinpkt variable. Additionally, there are observed outliers in Analysis, Backdoor, and Generic categories.
+
+
+```{r}
+dinpkt <- train %>% 
+  ggplot(aes(attack_cat, y = log1p(dinpkt),  fill = attack_cat)) +
+  geom_boxplot()+
+  labs(title = "Boxplot of Destination to Source packet count ", x = "Attack Category", y = "Dinpkt") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 5), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 8),
+        axis.title = element_text(size = 14))
+dinpkt
+```
+
+The destination to source packet count is very similar to the source to destination packet count. The distribution of both variables is comparatively equal in the attack categories.
+
+
+```{r}
+sjit <- train %>% 
+  ggplot(aes(attack_cat, y = log1p(sjit),  fill = attack_cat)) +
+  geom_boxplot()+
+  labs(title = "Boxplot of Source jitter (mSec)", x = "Attack Category", y = "Sjit") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 5), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 8),
+        axis.title = element_text(size = 14))
+sjit
+```
+
+Source jitter refers to the variation or fluctuations in the timing of packets sent from the source IP address, measured in milliseconds (mSec). Jitter can occur due to network congestion or other factors that cause delay or loss of packets. High jitter can result in poor quality of service (QoS) for real-time applications such as voice or video streaming. We observed that the distribution of Source Jitter is higher in attacks, with a significant height of normal traffic in the attack category. The attacks seem to be more prominent than the non-attacks.
+
+
+```{r}
+djit <- train %>% 
+  ggplot(aes(attack_cat, y = log1p(djit),  fill = attack_cat)) +
+  geom_boxplot()+
+  labs(title = "Boxplot of Destination jitter (mSec)", x = "Attack Category", y = "Djit") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 5), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 8),
+        axis.title = element_text(size = 14))
+djit
+```
+
+From the plot, we observed that there is a higher distribution of Source Jitter than Destination Jitter. Additionally, there are some outliers in the Destination Jitter.
+
+
+```{r}
+swin <- train %>% 
+  ggplot(aes(attack_cat, y =log1p(swin),  fill = attack_cat)) +
+  geom_boxplot()+
+  labs(title = "Boxplot of Swin", x = "Attack Category", y = "Swin") +
+  theme(plot.title = element_text(hjust = 0.5, size = 14), 
+        axis.text = element_text(size = 5), 
+        legend.text = element_text(size = 10), 
+        legend.title = element_text(size = 8),
+        axis.title = element_text(size = 14))
+swin
+```
+
+
+Source to destination during the last time period measured (two-way traffic), including both the payload and the TCP/IP headers. From the boxplot, we observed a relatively higher attack in the source window size compared to normal traffic, where the normal traffic is very small. This indicates that source window size can be a good predictor of an attack in the dataset.
+
+
+#Plot Bar diagram of mean for different features by attack category 
+
+*Below, I decided to display the mean variation of the features by attack categories to aid in understanding the distribution of these variables in attack categories. For variables with smaller values, logarithm may be applied to help capture the data for more insights.*
+
+
+
+The mean variation of the variables refers to the differences in the average values of the variables between the attack and normal traffic categories. By examining the mean variation of the variables, we can gain insights into how the variables are associated with the different attack types and use this information to develop models that accurately classify network traffic as either normal or malicious. The mean variation of the features can help in determining the accurate model by providing information on which features have the most significant impact on the target variable. Features with high mean variation are likely to be better predictors of the target variable than features with low mean variation. Therefore, selecting the features with the highest mean variation and using them in a model is likely to result in a more accurate model.
+Additionally, the mean variation can help in identifying outliers and detecting any unusual patterns in the data, which can inform the model selection and feature engineering processes. The mean variation plots below show how the data is distributed. Some of them have a higher distribution of attack while others have a higher distribution of normal traffic. The legends show the exact color and how it is represented in the main plot. By critically deducing from the color matching of the histogram and legend, it is very easy to interpret. Also, any bar that does not have the colour of normal in legend is an attack.
+
+
+
+```{r}
+training_conti [,c(1, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(1, 37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge")+
+  labs(title = "Mean variation plot of Duration Variable")
+
+```
+
+
+The mean seems to be slightly different from the boxplot of the Dur variable. The mean distribution of duration shows that there is a high variance in the number of attacks compared to the normal network packet duration.
+
+
+```{r}
+training_conti [,c(2, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(2, 37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  labs(title = "Mean variation of Source to destination packet count(Spkts)")
+
+```
+ 
+ 
+The mean value of Source to Destination packet count (Spkts) indicates a higher number of attacks compared to normal traffic. This suggests that the mean can be a good predictor of the attack categories.
+ 
+ 
+```{r}
+training_conti [,c(3, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(3, 37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge")+
+  labs(title = "The mean variation of Destination packet count (dpkts)")
+
+```
+
+```{r}
+training_conti [,c(4:6, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(4:6, 37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge")+
+  labs(title = "The mean variation of dytes, rate and sbytes Variable")
+
+```
+
+
+```{r}
+training_conti [,c(7:8, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(7:8, 37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  labs(title = "The mean variation of Destination time to live and Source time to live")
+
+```
+
+
+
+
+```{r}
+training_conti [,c(9, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(9, 37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "The mean distribution of Source bit per second")
+
+```
+
+```{r}
+training_conti [,c(10, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(10, 37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "The mean distribution of destination bits per second")
+
+```
+
+
+
+```{r}
+training_conti [,c(11, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(11, 37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge")+
+  labs(title = "The mean Distribution of Source Parket Retranmitted or dropped")
+
+```
+
+
+```{r}
+training_conti [,c(12, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(12, 37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "The mean Distribution of Destination Parket Retranmitted or dropped")
+
+```
+
+```{r}
+training_conti [,c(13, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(13, 37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "The Mean Distribution of Source interpacket Arrival Time")
+
+```
+
+```{r}
+training_conti [,c(14, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(14, 37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "The Mean Distribution of Destination interpacket Arrival Time")
+
+```
+
+```{r}
+training_conti [,c(15, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(15,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  labs(title = "The Mean Distribution of Source jitter (mSec)")
+
+```
+
+```{r}
+training_conti [,c(16, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(16,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "The Mean Distribution of Destination jitter (mSec)")
+```
+
+
+```{r}
+training_conti [,c(17, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(17,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "The Mean Distribution of Source window Size")
+```
+
+
+```{r}
+training_conti [,c(18, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(18,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value),.groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  labs(title = "The Mean Distribution of Source TCP Base sequence number")
+
+```
+
+```{r}
+training_conti [,c(19, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(19,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge")+
+  labs(title = "The Mean Distribution of Source TCP Base sequence number")
+```
+
+```{r}
+training_conti [,c(20, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(20,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value),.groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge")+
+    labs(title = "The Mean Distribution of Destination TCP Base sequence number")
+
+```
+
+```{r}
+training_conti [,c(21:22, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(21:22,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "The Mean Distribution of Syn ack and Tcp round trip-time")
+
+```
+
+
+```{r}
+training_conti [,c(23:24, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(23:24,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "The Mean Distribution of Source mean packet size and Dest mean packet size")
+
+```
+
+```{r}
+training_conti [,c(25, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(25,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  labs(title = "The Mean Distribution of Transaction length")
+
+```
+
+```{r}
+training_conti [,c(26, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(26,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge")+
+  labs(title = "The Mean Distribution of Respomse bodey length")
+
+```
+
+```{r}
+training_conti [,c(27:30, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(27:30,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  labs(title = "The Mean Distribution of ct_dst_ltm, ct_src_dport_ltm, ct_srv_src, ct_state_ttl")
+```
+
+
+```{r}
+training_conti [,c(31:32, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(31:32,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge")+
+  labs(title = "The Mean Distribution of ct_dst_sport_ltm and Ct_dst_src_itm")
+
+```
+
+```{r}
+training_conti [,c(33:34, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(33:34,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge") + 
+  labs(title = "The Mean Distribution of ct_flw_http_mthd and ct_ftp_cmd")
+
+```
+
+```{r}
+training_conti [,c(35:36, 37)] %>% 
+  group_by(attack_cat) %>% 
+  summarise_if(is.numeric, list(mean = mean, sd = sd)) -> training_contiData
+
+training_conti [,c(35:36,  37)] %>% 
+  pivot_longer(-attack_cat) %>% 
+  group_by(attack_cat, name) %>% 
+  summarise(Mean = mean(value),  
+            SD = sd(value), .groups = 'drop') -> training_contiData
+
+training_contiData %>%
+  ggplot(aes(name, Mean, fill = attack_cat)) +
+  geom_bar(stat = "identity", position = "dodge")+
+  labs(title = "The Mean Distribution of Transaction length")+
+  labs(title = "The Mean Distribution of ct_src_ltm and ct_srv_dst")
+
+
+```
+
+
+*(b) I determined if there was a significant association between the input features and the response variable. This involved running statistical tests to identify the most significant features that contribute to the model's prediction accuracy.*
+
+
+*The training dataset consists of 36 continuous and 5 categorical variables/features. To investigate the association between input features and labels, I performed independent t-tests for continuous variables and Chi-square tests for categorical variables. These tests yield a P-value, which indicates the statistical significance of a predictor in explaining the data and can be used to accept or reject the null hypothesis.*
+
+###t-test
+
+
+```{r}
+training_conti<-training_conti[,-37]
+t_Results <- lapply(seq_len(36), function(i) {
+  t_test <- t.test(training_conti[, i] ~ factor(training_conti[, 37]))
+  data.frame(mean_0 = t_test$estimate[1], mean_1 = t_test$estimate[2],
+             t_statistic = t_test$statistic, p_value = t_test$p.value)
+})
+t_Results <- do.call(rbind, t_Results)
+rownames(t_Results) <- names(training_conti)[1:36]
+t_Results
+
+
+```
+
+
+*We observed that all 35 features, except for "dur", are significantly associated with labels at a 5% level of significance. Therefore, we need to select features with p-values less than 0.05 for further analysis and prediction.*
+
+
+#Take 35 significant features whose p-value is less than 0.05;
+
+We extracted the the features that has p-value less than 0.05
+
+
+```{r}
+
+Sig_Variable <- t_Results[which(t_Results$p_value< 0.05),]
+Sig_Variable
+```
+
+
+*Apply Chi-Square test for categorical variable to show the association between categorical features and study variable*
+
+
+```{r}
+CS_test_statistic<-NULL
+pvalue_CS_testtest<-NULL
+
+for (i in 1:5){
+    CS_test<-chisq.test(training_cate[,i], training_cate$label)
+    CS_test_statistic[i]<-CS_test[[1]] ## Extract the value of t-statistics
+    pvalue_CS_testtest[i]<-CS_test[[3]] ## Extract the value of p-value
+}
+
+CS_Results <- cbind(CS_test_statistic,pvalue_CS_testtest)
+rownames(CS_Results) <- colnames(training_cate)[-6]
+CS_Results
+```
+
+**Below, I am going to do some encoding and data pre-processing**
+
+Encode All categorical variables and convert into numeric variables 
+
+
+```{r}
+encode_ordinal <- function(x, order = unique(x)) {
+  x <- as.numeric(factor(x, levels = order, exclude = NULL))
+  x
+}
+```
+
+Encode all categorical variables into numeric for Training Set 
+```{r}
+train$proto<-encode_ordinal(train$proto)
+train$service<-encode_ordinal(train$service)
+train$state <-encode_ordinal(train$state)
+
+dim(train)
+```
+
+Encode all categorical variables into numeric for Test Set 
+```{r}
+test$proto<-encode_ordinal(test$proto)
+test$service<-encode_ordinal(test$service)
+test$state <-encode_ordinal(test$state)
+
+dim(test)
+
+```
+
+
+(C) We performed data pre-processing to clean and scale the data
+
+*Standardize the continuous vairiable for both training and test dataset* 
+
+In this dataset, there are several continuous variables that have different properties and are measured on different scales. To make these continuous variables more comparable and homogeneous, we standardized or normalized the dataset. This involves transforming the data so that the values fall within a similar scale, usually between 0 and 1.
+Standardization or normalization helps to give equal importance to all the features, making it easier to compare and analyze them. It is particularly useful when dealing with datasets that contain many features as this. By scaling the data, we can prevent features with larger values from dominating the analysis and ensure that all features contribute equally to the model.
+
+
+```{r}
+train_std<-data.frame(scale(train[,-c(cate_index,42, 43)]), train[,cate_index],
+         label=as.factor(train[,43]))
+
+
+test_std<-data.frame(scale(test[,-c(cate_index,42)]), test[,cate_index],
+         label=as.factor(test[,42]))
+
+dim(train_std)
+dim(test_std)
+
+```
+
+
+.
+
+
+
+
+(d) we evaluated the accuracy of all input features in predicting Label. I trained the models on the training dataset and used the test set to evaluate its performance
+
+*Here is where the model comparison and fitting process begins. First, we will train the models using all the features and then using the 20 most significant features. Next, I will fit the models and compare the classification accuracy between logistic regression and KNN.*
+
+
+To begin model comparison and fitting, a logistic regression model was trained using all the features in the dataset. The glmnet method was used to train the model for all 42 features in the dataset.
+
+
+```{r}
+library(caret)
+set.seed(123)
+
+trControl = trainControl(method = "cv", number = 5)
+
+
+cv_model1 <- train(label ~ ., data = train_std, method = "glmnet",
+                   family = "binomial", trControl = trControl)
+cv_model1
+```
+
+
+*Here, we plot cross-validation results of logistic regression model trained for all features.*
+
+
+```{r}
+ggplot(cv_model1,aes(x = log(cv_model1$results$lambda), y = cv_model1$results$Accuracy) ) +
+geom_point() + scale_x_reverse() + labs(x = "log(lambda)", y = "Classification accuracy") +
+ggtitle("L1 Regularization and Cross-Validation")
+
+```
+
+
+The best tuned optimal parameter is at alpha = 1 and lambda = 0.0005016511, which has an accuracy of 0.9089861. Therefore, we will use this parameter for predicting an attack.
+
+Furthermore, by extracting the best tuned parameters of the logistic regression model, we can gain more evidence to support the assertion above.
+
+
+```{r}
+optimaparameters <- cv_model1$bestTune
+optimaparameters
+```
+
+
+*Predict Class and its probability using logistic regression model on Test Dataset*
+
+```{r}
+
+pred_test_class <- predict(cv_model1, test_std[,-42])
+pred_test_prob <- predict(cv_model1, test_std, type='prob')[,1]
+
+```
+
+
+*We created a confusion matrix summary for our logistic regression model to visualize and evaluate the accuracy of our model, as well as to observe any instances of misclassification.*
+
+In the summary of our model, the accuracy is at 0.8526 for all the data variables using the test data.
+
+```{r}
+cmf_test<-confusionMatrix(pred_test_class, test_std[,42])
+cmf_test
+```
+
+
+*Draw Confusion Matrix Plot of Logistics Rergression of test dataset for all features*
+
+```{r}
+plt_test <- as.data.frame(cmf_test$table)
+
+plt_test$Prediction <- factor(plt_test$Prediction, levels=rev(levels(plt_test$Prediction)))
+
+ggplot(plt_test, aes(Prediction,Reference, fill= Freq)) +
+        geom_tile() +
+        geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="green", high="red") +
+        labs(x = "Reference",y = "Prediction", title="Confusion Matrix of LR for All Features") +
+        theme(plot.title = element_text(hjust = 0.5, size = 14))+
+        scale_x_discrete(labels=c("1","0")) +
+        scale_y_discrete(labels=c("0","1"))
+```
+
+
+After analyzing the model and the confusion matrix, we observed that our model classified attack and normal traffic with good accuracy. The number of true negatives and false positives was relatively small compared to the accurately classified instances. Additionally, we increased the tuning parameter of the cross-validation and discovered that the best optimal parameter was at N=5 for a five-fold cross-validation.
+
+
+*Extract accuracy, sensitivity, specificity, positive predictive value, and negative predictive value*
+
+```{r}
+ACC_test<-cmf_test$overall[1]
+SE_test<-cmf_test$byClass[1]
+SP_test<-cmf_test$byClass[2]
+PPV_test<-cmf_test$byClass[3]
+NPV_test<-cmf_test$byClass[4]
+```
+
+
+Check the ROC curve for all the features using Logistic regression model.
+
+
+```{r}
+roc.curve(test_std[,42], pred_test_prob,col = '1', lwd = '3', main="ROC Curve of LR for All Features",
+xlab="1-Specificity",ylab="Sensitivity", cex.lab=1.5, cex.main=1,
+cex.axis=1.2, lty=1:2, pch=20)
+legend("bottomright", legend = "(AUC) = 0.949", cex = 1.2, bty = "n")
+
+```
+
+
+From the Area Under the cove in the ROC curve, we deduced a very encouraging classification accuracy using this model for all features.
+
+Combine  all results for testing dataset in all predictive variables 
+
+
+```{r}
+test_results<-cbind(ACC_test,SE_test, SP_test, PPV_test,NPV_test)
+test_results
+```
+
+
+*Here, I train and fit in a KNN model for all features using k = 5 and cross validation of 5 folds*
+#Fit KNN-based model for considering all features 
+
+```{r}
+set.seed(123)
+trControl = trainControl(method = "cv", number = 5)
+
+cv_model2 <- train(label ~ ., data = train_std, method = "knn",
+                   trControl = trControl)
+cv_model2
+
+```
+
+Plot cross-validation results of KNN model 
+
+```{r}
+ggplot(cv_model2,aes(x = cv_model2$results$k, y =cv_model2$results$Accuracy)*100) +
+geom_point() + scale_x_reverse() + labs(x = "Value of K", y = "Classification accuracy") +
+ggtitle("Cross-Validation results of K-NN Classifier for all features")
+```
+
+
+From the plot,  the optimal value for the tuned model is when K= 5 which is seen in the plainly with an accuracy of 0.9351253.
+
+
+Also, if we use the function of obtaining the best parameter, we found the best tuned parameters for knn model of all features below.
+
+```{r}
+optimaparameters_knn <- cv_model2$bestTune
+optimaparameters_knn
+```
+
+Predict Class and its probability using KNN on Test Dtaset and the best Tuned model.
+
+```{r}
+pred_test_class_knn <- predict(cv_model2, test_std)
+pred_test_prob_knn <- predict(cv_model2, test_std, type='prob')[,1]
+```
+
+
+
+Create Confusion Matrix summary for KNN model of all variables to fully 
+furthermore, from the summary, we deduced the model accuracy to be 0.8526 which seems to be thesame with that of the logisic regression.
+
+
+```{r}
+cmf_test_knn<-confusionMatrix(pred_test_class, test_std[,42])
+cmf_test_knn
+```
+
+
+We draw a confusion matrixs of the KNN prediction for all variables.
+
+# Confusion Matrix of K-Nearest Neighbour for all features.
+
+```{r}
+plt_test_knn <- as.data.frame(cmf_test_knn$table)
+plt_test_knn$Prediction <- factor(plt_test_knn$Prediction, levels=rev(levels(plt_test_knn$Prediction)))
+ggplot(plt_test_knn, aes(Prediction,Reference, fill= Freq)) +
+        geom_tile() +
+        geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="green", high="red") +
+        labs(x = "Reference",y = "Prediction", title="Confusion Matrix of KNN for All Features") +
+        theme(plot.title = element_text(hjust = 0.5, size = 14))+
+        scale_x_discrete(labels=c("1","0")) +
+        scale_y_discrete(labels=c("0","1"))
+```
+T
+
+he classification is very similar, with a minor difference in the logistic regression. This will become apparent when we plot the ROC curve for KNN below.
+
+Plot the ROC curve for KNN for all features
+
+
+```{r}
+#This is for model 2 (KNN), considering all features: 
+roc.curve(test_std[,42], pred_test_prob_knn,col = '2', lwd = '3', main="ROC Curve of KNN for All
+Features",xlab="1-Specificity",ylab="Sensitivity", cex.lab=1.5, cex.main=1,
+cex.axis=1.2, lty=1:2, pch=20)
+legend("bottomright", legend = "(AUC) = 0.937", cex = 1.2, bty = "n")
+```
+
+Based on the ROC curve of the K-nearest neighbor model, we observed that its performance is very similar to that of the logistic regression model, with only minor differences. However, when we compared the two models for all features, logistic regression showed a slightly better performance, with an accuracy difference of only 0.012. Although I had expected KNN to perform better, we cannot manipulate the data to favor our biases.
+
+
+
+
+(e) I determined how accurately the most significant features, obtained from step (b), predict intrusion. We used these features to train the model and evaluated its performance on the test set.
+(f) I compared the performance of the model using the most significant features and using all features in the dataset to determine which model performs better.
+
+
+
+#Determine the Important Features from training set and choose only top 20 features 
+
+I extracted the most 20 important features from our first model and train it, fit Logistic regression and KNN to study which one is more accurate between the two model.
+
+```{r}
+gbmImp <- varImp(cv_model1, scale = FALSE)
+plot(gbmImp, top = 20)
+```
+
+Extract the index and feature names
+
+```{r}
+
+col_index <- varImp(cv_model1)$importance %>% 
+  mutate(names=row.names(.)) %>%
+  arrange(-Overall)
+
+imp_names <- col_index$names[1:20]
+imp_names 
+```
+
+
+
+Extract top 20 features from test dataset 
+  
+```{r}
+train_std_sig <- data.frame(train_std[,imp_names], label=train_std$label)
+head(train_std_sig)
+
+test_std_sig <- data.frame(test_std[,imp_names], label=test_std$label)
+head(test_std_sig)
+```
+
+Now take top 20 most singificant features obtained and implement the model to check its performance using Logistic regression and K-Nearest Neighbor. 
+
+
+##Fit LR model again for 20 most significant features 
+
+```{r}
+trControl = trainControl(method = "cv", number = 5)
+cv_model3 <- train( label ~., data = train_std_sig, 
+                    method = "glmnet", family = "binomial",trControl=trControl )
+cv_model3$bestTune
+cv_model3
+
+```
+
+# Plot cross-validation results for 20 significant features 
+
+```{r}
+ggplot(cv_model3,aes(x = log(cv_model3$results$lambda), y = cv_model3$results$Accuracy) ) +
+geom_point() + scale_x_reverse() + labs(x = "log(lambda)", y = "Classification accuracy") +
+ggtitle("Elastic.Net Regularization and Cross-Validation")
+```
+
+
+
+The plot shows that the optimal parameter is at Alpha = 1, Lambda = 0.0005016511 . Next we check the prediction accuracy of the model.
+
+
+*Predict Class and also its class probability on Test Dataset considering 20 significant features*
+
+```{r}
+pred_test_class_sig <- predict(cv_model3, test_std_sig)
+pred_test_prob_sig <- predict(cv_model3, test_std_sig, type='prob')[,1]
+```
+
+
+Create Confusion Matrix summary for test dataset for considering 20 significant features
+
+
+```{r}
+cmf_test_sig<-confusionMatrix(pred_test_class_sig, test_std_sig[,21])
+cmf_test_sig
+```
+
+
+Here the accuracy of the model is O.8015 which is lower than the accuracy of logistic regresion using all features. 
+
+
+# Draw Confusion Matrix Plot for test dataset for considering 20 significant features
+
+```{r}
+plt_test_sig <- as.data.frame(cmf_test_sig$table)
+plt_test_sig$Prediction <- factor(plt_test_sig$Prediction, levels=rev(levels(plt_test_sig$Prediction)))
+
+ggplot(plt_test_sig, aes(Prediction,Reference, fill= Freq)) +
+        geom_tile() +
+        geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="green", high="red") +
+        labs(x = "Reference",y = "Prediction", title="Confusion Matrix of LR for Only 20 Features") +
+        theme(plot.title = element_text(hjust = 0.5, size = 14))+
+        scale_x_discrete(labels=c("1","0")) +
+        scale_y_discrete(labels=c("0","1"))
+```
+
+
+The confusion matrix for this logistic regression model shows a significant increase in false positives and decrease in False Negative compared to the model using all features. The model performed better when using all features rather than the reduced set of features. We will further check this assertion by examining the ROC curve.
+
+
+This is the ROC curve for LR, considering top 20 features: 
+```{r}
+
+roc.curve(test_std_sig[,21], pred_test_prob_sig,col = '3', lwd = '3', main="ROC Curve of LR for 20 Sig
+Features",xlab="1-Specificity",ylab="Sensitivity", cex.lab=1.5, cex.main=1,
+cex.axis=1.2, lty=1:2, pch=20)
+legend("bottomright", legend = "((AUC): 0.925", cex = 1.2, bty = "n")
+```
+
+*The ROC curve shows a decrease in the AUC, which supports our conclusion that the logistic regression model using all features has higher predictive accuracy compared to the logistic regression model using only the 20 most significant features.*
+
+
+Extract accuracy, sensitivity, specificity, positive predictive value, and negative predictive value for considering 20 significant features
+
+```{r}
+ACC_test_sig<-cmf_test_sig$overall[1]
+SE_test_sig<-cmf_test_sig$byClass[1]
+SP_test_sig<-cmf_test_sig$byClass[2]
+PPV_test_sig<-cmf_test_sig$byClass[3]
+NPV_test_sig<-cmf_test_sig$byClass[4]
+```
+
+##Combine the all results for testing dataset for considering 40 significant features
+
+```{r}
+test_results_sig<-cbind(ACC_test_sig,SE_test_sig, SP_test_sig, PPV_test_sig,NPV_test_sig)
+test_results_sig
+```
+##Combined all training and test results for considering 20 significant features
+
+```{r}
+Combined_results_sig<-round(cbind(test_results, test_results_sig)*100,2)
+Final_results_sig<-matrix(Combined_results_sig, nc=2, nr=5)
+colnames(Final_results_sig)<-c("LR: All Features", "LR: Limited (20) Features")
+rownames(Final_results_sig)<-c("ACC", "SE", "SP", "PPV", "NPV")
+Final_results_sig
+```
+
+The final model 4 using KNN in the 20 most significant features.
+##Fit KNN model again for 20 significant features 
+```{r}
+trControl = trainControl(method = "cv", number = 5)
+cv_model4 <- train( label ~., data = train_std_sig, 
+                    method = "knn",trControl=trControl )
+cv_model4
+```
+
+# Plot cross-validation results for 20 significant features 
+
+```{r}
+ggplot(cv_model4,aes(x = log(cv_model4$results$k), y = cv_model4$results$Accuracy) ) +
+geom_point() + scale_x_reverse() + labs(x = "k", y = "Classification accuracy") + ggtitle("Cross-Validation results of K-NN Classifier")
+
+```
+
+The optimal parameter is obtained when k = 5. It's worth noting that I also conducted cross-validation for higher values of k, but the best-tuned parameter remained at k = 5, which is why I consistently used it. I excluded higher values of k because performing cross-validation for k = 20 would take much longer and require more computational power. we will check the predictive accuracy below.
+
+Predict Class and also its class probability on Test Dtaset for considering 20 significant
+```{r}
+
+pred_test_class_sig_knn <- predict(cv_model4, test_std_sig)
+pred_test_prob_sig_knn  <- predict(cv_model4, test_std_sig, type='prob')[,1]
+
+```
+
+Create Confusion Matrix summary for test dataset for considering 20 significant features
+
+```{r}
+cmf_test_sig_knn <-confusionMatrix(pred_test_class_sig_knn , test_std_sig [,21])
+cmf_test_sig_knn 
+```
+
+
+Based on the summary of the confusion matrix, we observed that the accuracy of the KNN model is higher than that of Logistic Regression for the 20 most significant features.  
+
+
+Draw KNN Confusion Matrix Plot for test dataset for considering 20 significant features
+
+```{r}
+plt_test_knn  <- as.data.frame(cmf_test_sig_knn $table)
+
+plt_test_knn $Prediction <- factor(plt_test_knn $Prediction,
+                                   levels=rev(levels(plt_test_knn$Prediction)))
+
+ggplot(plt_test_knn , aes(Prediction,Reference, fill= Freq)) +
+        geom_tile() +
+        geom_text(aes(label=Freq)) +
+        scale_fill_gradient(low="green", high="red") +
+        labs(x = "Reference",y = "Prediction", title="Confusion Matrix of KNN for Only 20 Features") +
+        theme(plot.title = element_text(hjust = 0.5, size = 14))+
+        scale_x_discrete(labels=c("1","0")) +
+        scale_y_discrete(labels=c("0","1"))
+```
+This is the ROC curve for KNN, considering top 20 features:
+```{r}
+
+roc.curve(test_std_sig[,21], pred_test_prob_sig_knn ,col = '4', lwd = '3', main="ROC Curve of KNN for 20 Sig
+Features",xlab="1-Specificity",ylab="Sensitivity", cex.lab=1.5, cex.main=1,
+cex.axis=1.2, lty=1:2, pch=20)
+legend("bottomright", legend = "((AUC): 0.889", cex = 1.2, bty = "n")
+```
+
+
+Well, surprisingly, the predictive accuracy of KNN with the 20 most significant features turned out to be the lowest, even lower than that of logistic regression using only the 20 features, despite KNN having a higher model accuracy than logistic regression.
+
+
+Extract accuracy, sensitivity, specificity, positive predictive value, and negative predictive value for considering 20 significant features
+
+```{r}
+ACC_test_sig_knn <-cmf_test_sig_knn $overall[1]
+SE_test_sig_knn <-cmf_test_sig_knn $byClass[1]
+SP_test_sig_knn <-cmf_test_sig_knn $byClass[2]
+PPV_test_sig_knn <-cmf_test_sig_knn $byClass[3]
+NPV_test_sig_knn <-cmf_test_sig_knn $byClass[4]
+```
+
+Combine all the results for testing dataset considering 40 significant features
+
+```{r}
+test_results_sig_knn <-cbind(ACC_test_sig_knn ,SE_test_sig_knn , SP_test_sig_knn, PPV_test_sig_knn
+                             ,NPV_test_sig_knn )
+test_results_sig_knn 
+```
+
+
+
+Combined all LR and KNN results for considering 20 significant features
+
+```{r}
+Combined_results_sig<-round(cbind(test_results, test_results_sig_knn)*100,2)
+Final_results_sig<-matrix(Combined_results_sig, nc=2, nr=5)
+colnames(Final_results_sig)<-c("LR: All Features", "LR: Limited (20) Features")
+rownames(Final_results_sig)<-c("ACC", "SE", "SP", "PPV", "NPV")
+Final_results_sig
+```
+
+
+(g) I also compared the Logistic regression model to the K-nearest neighbor model to determine which model performs better in classification of attack and or intrusion.
+
+
+*Finally we plotted the ROC curve of all the four models together to detrmine which model accurately perform better than the other between all the features and 20 most predictive features.*
+
+Now we have to compare the ROC curve for of LR and KNN for  all features and only 20 features
+
+```{r}
+library(pROC)
+library(ROCR)
+library(ROSE)
+library(AUC)
+
+roc.curve(test_std[,42], pred_test_prob,col = '1', lwd = '3', main="ROC Curve",
+          xlab="1-Specificity",ylab="Sensitivity", cex.lab=1.5, cex.main=2, 
+          cex.axis=1.2, lty=1:2, pch=20)
+roc.curve(test_std[,42], pred_test_prob_knn,col = '2', lwd = '3', add=TRUE)
+
+roc.curve(test_std_sig[,21], pred_test_prob_sig,col = '3', lwd = '3', add=TRUE)
+roc.curve(test_std_sig[,21], pred_test_prob_sig_knn,col = '4', lwd = '3', add=TRUE)
+
+legend('bottomright',inset=c(.02,.02),c("LR (All)-AUC: 0.949", "KNN (All)-AUC: 0.937", 
+                                        "LR (Sig.)-AUC: 0.925", "KNN (Sig.)-AUC: 0.889"),
+       col=c('1','2', '3', '4'),lwd=3)
+
+```
+
+
+ *Conclusion*
+ 
+ 
+The final ROC curve for the four (4) models shows that the Logistic regression model for all features has the highest predictive accuracy with an AUC of 0.949. We also observed that the predictive accuracy of the 20 most significant features' performance is low compared to that of all features. Individually, the Logistic regression performed better in both the 20 features and all features. In conclusion, the Logistic regression model is better at predicting an attack with a very high accuracy on unseen data in the UNSW_NB15 dataset.
+
+
+*Impact of my analysis:*
+
+
+The impact of this analysis is that it provides insights into the performance of different machine learning models, specifically logistic regression and K-nearest neighbors (KNN), on predicting attacks in the UNSW_NB15 dataset. The analysis shows that logistic regression with all features has the highest predictive accuracy, while KNN with 20 most significant features has the lowest predictive accuracy. This information can be useful for organizations and security professionals who are looking to implement machine learning-based intrusion detection systems. By understanding the strengths and weaknesses of different models, they can make informed decisions about which models to use and how to configure them for optimal performance. i also learnt that the most predictive feature is dttl followed by sttl. I am not surprise because i already deduced it from the distribution of the two variables in the Data exploration i.e the mean variance of both of them. I also learnt from this model that it can be used to predict intrusion and can serve as a test parameter for real world security or intrusion detection design.
+
+
+*Trade-off*
+
+
+There is a trade-off between predictive accuracy and computational resources required to train and test the models. Some models, such as K-nearest neighbors, can be computationally expensive when working with large datasets or high-dimensional feature spaces just like in this dataset. Additionally, more complex models like deep neural networks may require significant computational power and time to train. Therefore, choosing the right model for a given problem involves a trade-off between accuracy and resource requirements. There is also a possiblity that the model may have inherent biases that can lead to unfair predictions. This can be observed in the KNN for 20 most predictive features where the model has higher accurracy compared to Logistic regression but the predictive accuracy is vice-versa.
+
+
+
+
+
+
+
